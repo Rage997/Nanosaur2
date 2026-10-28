@@ -17,10 +17,12 @@
 /*    PROTOTYPES            */
 /****************************/
 
+#ifndef __EMSCRIPTEN__
 static PFNGLACTIVETEXTUREPROC gGlActiveTextureProc;
 static PFNGLCLIENTACTIVETEXTUREARBPROC gGlClientActiveTextureProc;
 #define glActiveTexture gGlActiveTextureProc
 #define glClientActiveTexture gGlClientActiveTextureProc
+#endif
 
 static void OGL_CreateDrawContext(void);
 static void OGL_DisposeDrawContext(void);
@@ -37,7 +39,9 @@ static long OGL_MaxMemForVARType(Byte varType);
 static void	ConvertTextureToGrey(void *imageMemory, short width, short height, GLint srcFormat, GLint dataType);
 static void	ConvertTextureToColorAnaglyph(void *imageMemory, short width, short height, GLint srcFormat, GLint dataType);
 
+#ifndef __EMSCRIPTEN__
 static void DrawBlueLine(GLint window_width, GLint window_height);
+#endif
 static void ClearAllBuffersToBlack(void);
 
 /****************************/
@@ -73,6 +77,12 @@ Byte					gAnaglyphPass;
 Byte					gAnaglyphGreyTable[255];
 
 SDL_GLContext			gAGLContext = nil;
+
+#if defined(__EMSCRIPTEN__) && !defined(_DEBUG)
+// getError synchronizes with the browser's GPU process. Release builds check
+// the complete frame; setup/loading and debug builds retain per-operation checks.
+static bool gDeferWebGLErrors = false;
+#endif
 
 
 OGLMatrix4x4	gViewToFrustumMatrix,gWorldToViewMatrix,gWorldToFrustumMatrix, gLocalToViewMatrix, gLocalToFrustumMatrix;
@@ -385,11 +395,15 @@ GLint			maxTexSize;
 			/* GET GL PROCEDURES */
 			// Necessary on Windows
 
+#ifdef __EMSCRIPTEN__
+	WebGL_Init();
+#else
 	gGlActiveTextureProc = (PFNGLACTIVETEXTUREPROC) SDL_GL_GetProcAddress("glActiveTexture");
 	GAME_ASSERT(gGlActiveTextureProc);
 
 	gGlClientActiveTextureProc = (PFNGLCLIENTACTIVETEXTUREARBPROC) SDL_GL_GetProcAddress("glClientActiveTexture");
 	GAME_ASSERT(gGlClientActiveTextureProc);
+#endif
 }
 
 /**************** OGL: NUKE DRAW CONTEXT *********************/
@@ -405,6 +419,9 @@ static void OGL_DisposeDrawContext(void)
 		return;
 	}
 
+#ifdef __EMSCRIPTEN__
+	WebGL_Shutdown();
+#endif
 	SDL_GL_MakeCurrent(gSDLWindow, NULL);		// make context not current
 	SDL_GL_DestroyContext(gAGLContext);			// nuke context
 	gAGLContext = nil;
@@ -662,6 +679,9 @@ GLfloat	ambient[4];
 
 void OGL_DrawScene(void (*drawRoutine)(void))
 {
+#if defined(__EMSCRIPTEN__) && !defined(_DEBUG)
+	gDeferWebGLErrors = true;
+#endif
 	SDL_GetWindowSizeInPixels(gSDLWindow, &gGameWindowWidth, &gGameWindowHeight);
 
 
@@ -933,8 +953,10 @@ do_anaglyph:
 			/* END RENDER */
 			/**************/
 
+#ifndef __EMSCRIPTEN__
 	if (IsStereoShutter())
 		DrawBlueLine(gGameWindowWidth, gGameWindowHeight);
+#endif
 
 
 
@@ -950,13 +972,19 @@ do_anaglyph:
 	if (IsStereo())
 		RestoreCamerasFromAnaglyph();
 
+#if defined(__EMSCRIPTEN__) && !defined(_DEBUG)
+	gDeferWebGLErrors = false;
+	OGL_CheckError();
+#endif
 }
+
 
 /***************** DRAW BLUE LINE ************************/
 //
 // for stereo blue-line stuff
 //
 
+#ifndef __EMSCRIPTEN__
 static void DrawBlueLine(GLint window_width, GLint window_height)
 {
 	glPushAttrib(GL_ALL_ATTRIB_BITS);
@@ -1025,6 +1053,7 @@ static void DrawBlueLine(GLint window_width, GLint window_height)
 		DoFatalAlert("DrawBlueLine failed");
 
 }
+#endif
 
 
 
@@ -1763,7 +1792,15 @@ OGLLightDefType	*lights;
 
 GLenum OGL_CheckError_Impl(const char* file, const int line)
 {
+#if defined(__EMSCRIPTEN__) && !defined(_DEBUG)
+	if (gDeferWebGLErrors)
+		return GL_NO_ERROR;
+#endif
 	GLenum error = glGetError();
+#ifdef __EMSCRIPTEN__
+	if (error == 0x9242)	// CONTEXT_LOST_WEBGL can precede the browser's contextlost event.
+		DoFatalAlert("Graphics context lost. Reload the game to recover; unsaved progress will be lost.");
+#endif
 	if (error != 0)
 	{
 		const char* text;

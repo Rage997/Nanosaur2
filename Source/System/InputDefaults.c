@@ -1,6 +1,11 @@
 #include "game.h"
 
-#if __APPLE__
+#if defined(__EMSCRIPTEN__)
+	#define SC_NWEAP SDL_SCANCODE_E
+	#define SC_PWEAP SDL_SCANCODE_Q
+	#define SC_DROP1 SDL_SCANCODE_C
+	#define SC_DROP2 SDL_SCANCODE_C
+#elif __APPLE__
 	#define SC_NWEAP SDL_SCANCODE_LGUI
 	#define SC_PWEAP SDL_SCANCODE_RGUI
 	#define SC_DROP1 SDL_SCANCODE_LALT

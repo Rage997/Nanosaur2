@@ -45,6 +45,16 @@ static void OnPickLanguage(void)
 	LayoutCurrentMenuAgain(true);
 }
 
+static int HideDesktopOnlySetting(const MenuItem* mi)
+{
+	(void) mi;
+#ifdef __EMSCRIPTEN__
+	return kMILayoutFlagHidden;
+#else
+	return 0;
+#endif
+}
+
 static void OnToggleFullscreen(void)
 {
 	SetFullscreenMode(true);
@@ -100,9 +110,13 @@ static void OnChangeVSync(void)
 static int ShouldDisplayMonitorCycler(const MenuItem* mi)
 {
 	(void) mi;
+#ifdef __EMSCRIPTEN__
+	return kMILayoutFlagHidden;
+#else
 
 	// Expose the option if we have more than one display
 	return (GetNumDisplays() <= 1) ? kMILayoutFlagHidden : 0;
+#endif
 }
 
 static const char* GetDisplayName(Byte value)
@@ -325,6 +339,7 @@ static const MenuItem gSettingsMenuTree[] =
 	{kMISpacer, .customHeight=.3f},
 	{
 		kMICycler2, STR_FULLSCREEN,
+		.getLayoutFlags=HideDesktopOnlySetting,
 		.callback=OnToggleFullscreen,
 		.cycler=
 		{
@@ -349,6 +364,7 @@ static const MenuItem gSettingsMenuTree[] =
 	},
 	{
 		kMICycler2, STR_VSYNC,
+		.getLayoutFlags=HideDesktopOnlySetting,
 		.callback = OnChangeVSync,
 		.cycler =
 		{
@@ -358,6 +374,7 @@ static const MenuItem gSettingsMenuTree[] =
 	},
 	{
 		kMICycler2, STR_ANTIALIASING,
+		.getLayoutFlags=HideDesktopOnlySetting,
 		.callback = OnChangeMSAA,
 		.cycler =
 		{

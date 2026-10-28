@@ -375,6 +375,12 @@ void MoveToPreferredDisplay(void)
 
 void SetFullscreenMode(bool enforceDisplayPref)
 {
+#ifdef __EMSCRIPTEN__
+	(void) enforceDisplayPref;
+	// Browser fullscreen is controlled by the launcher's user-gesture button.
+	WebResize(EM_ASM_INT({ return Module.canvas.clientWidth; }),
+		EM_ASM_INT({ return Module.canvas.clientHeight; }));
+#else
 	if (!gGamePrefs.fullscreen)
 	{
 		SDL_SetWindowFullscreen(gSDLWindow, 0);
@@ -407,4 +413,5 @@ void SetFullscreenMode(bool enforceDisplayPref)
 	}
 
 	SDL_GL_SetSwapInterval(gGamePrefs.vsync);
+#endif
 }

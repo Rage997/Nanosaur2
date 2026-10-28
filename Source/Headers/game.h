@@ -18,8 +18,15 @@
 
 #include <Pomme.h>
 #include <SDL3/SDL.h>
+#ifdef __EMSCRIPTEN__
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 #include <SDL3/SDL_opengl.h>
 #include <SDL3/SDL_opengl_glext.h>
+#ifdef __EMSCRIPTEN__
+#include "webgl_compat.h"
+#include "webplatform.h"
+#endif
 #include <math.h>
 #include <stdlib.h>
 

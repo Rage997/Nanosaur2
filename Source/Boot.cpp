@@ -4,6 +4,9 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #include "Pomme.h"
 #include "PommeInit.h"
@@ -78,6 +81,10 @@ static void Boot(int argc, char** argv)
 	SDL_SetLogPriorities(SDL_LOG_PRIORITY_INFO);
 #endif
 
+#ifdef __EMSCRIPTEN__
+	// The launcher restores this IDBFS mount before entering main.
+	setenv("XDG_CONFIG_HOME", "/prefs", 1);
+#endif
 	// Start our "machine"
 	Pomme::Init();
 
@@ -87,6 +94,11 @@ static void Boot(int argc, char** argv)
 
 	// Load game prefs before starting
 	LoadPrefs();
+#ifdef __EMSCRIPTEN__
+	gGamePrefs.antialiasingLevel = 0;	// WebGL owns default-framebuffer multisampling.
+	if (IsStereoShutter())
+		gGamePrefs.stereoGlassesMode = STEREO_GLASSES_MODE_OFF;
+#endif
 
 retryVideo:
 	// Initialize SDL video subsystem
@@ -96,9 +108,15 @@ retryVideo:
 	}
 
 	// Create window
+#ifdef __EMSCRIPTEN__
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
 
 	gCurrentAntialiasingLevel = gGamePrefs.antialiasingLevel;
 	if (gCurrentAntialiasingLevel != 0)
@@ -187,7 +205,11 @@ int main(int argc, char** argv)
 	if (!success)
 	{
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Uncaught exception: %s", uncaught.c_str());
+#ifdef __EMSCRIPTEN__
+		EM_ASM({ Module.reportError(UTF8ToString($0)); }, uncaught.c_str());
+#else
 		SDL_ShowSimpleMessageBox(0, GAME_FULL_NAME, uncaught.c_str(), nullptr);
+#endif
 	}
 
 	return success ? 0 : 1;

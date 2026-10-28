@@ -864,7 +864,11 @@ go_here:
 	if (data->numTriangles)
 	{
 		GAME_ASSERT(data->triangles);
+#ifdef __EMSCRIPTEN__
+		WebGL_DrawTriangles(data->numPoints, data->numTriangles * 3, data->triangles);
+#else
 		glDrawElements(GL_TRIANGLES,data->numTriangles*3,GL_UNSIGNED_INT,&data->triangles[0]);
+#endif
 		OGL_CheckError();
 	}
 

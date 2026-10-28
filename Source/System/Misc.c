@@ -55,7 +55,11 @@ void DoAlert(const char* format, ...)
 	va_end(args);
 
 	SDL_Log("Nanosaur 2 Alert: %s\n", message);
+#ifdef __EMSCRIPTEN__
+	EM_ASM({ Module.reportWarning(UTF8ToString($0)); }, message);
+#else
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Nanosaur 2", message, /*gSDLWindow*/NULL);
+#endif
 
 	Exit2D();
 }
@@ -74,7 +78,11 @@ void DoFatalAlert(const char* format, ...)
 	va_end(args);
 
 	SDL_Log("Nanosaur 2 Fatal Alert: %s\n", message);
+#ifdef __EMSCRIPTEN__
+	EM_ASM({ Module.reportError(UTF8ToString($0)); }, message);
+#else
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Nanosaur 2", message, /*gSDLWindow*/NULL);
+#endif
 
 	Exit2D();
 	CleanQuit();
@@ -345,6 +353,9 @@ void VerifySystem(void)
 
 void CalcFramesPerSecond(void)
 {
+#ifdef __EMSCRIPTEN__
+	WebFrame();
+#else
 static UnsignedWide time;
 UnsignedWide currTime;
 unsigned long deltaTime;
@@ -415,6 +426,7 @@ wait:
 
 
 	time = currTime;	// reset for next time interval
+#endif
 }
 
 

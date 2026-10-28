@@ -1161,10 +1161,14 @@ void GrabMouse(Boolean capture)
 		BackupRestoreCursorCoord(true);
 	}
 
+#ifdef __EMSCRIPTEN__
+	WebSetMouseCapture(capture);
+#else
 	SDL_SetWindowMouseGrab(gSDLWindow, capture);
 	SDL_SetWindowRelativeMouseMode(gSDLWindow, capture);
 //	SDL_ShowCursor(capture? 0: 1);
 	SetMacLinearMouse(capture);
+#endif
 
 	if (!capture)
 	{

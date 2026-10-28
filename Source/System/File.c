@@ -1433,6 +1433,10 @@ long				count;
 	count = payloadLength;
 	iErr = FSWrite(refNum, &count, payloadPtr);
 	FSClose(refNum);
+#ifdef __EMSCRIPTEN__
+	if (iErr == noErr)
+		EM_ASM({ Module.persist(); });
+#endif
 
 	SDL_Log("Wrote %s\n", file.cName);
 
@@ -1450,6 +1454,10 @@ OSErr DeleteUserDataFile(const char* filename)
 	iErr = MakeFSSpecForUserDataFile(filename, &file);
 	if (iErr == noErr)
 		iErr = FSpDelete(&file);
+#ifdef __EMSCRIPTEN__
+	if (iErr == noErr)
+		EM_ASM({ Module.persist(); });
+#endif
 	return iErr;
 }
 
