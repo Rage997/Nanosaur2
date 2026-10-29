@@ -2,6 +2,7 @@
 
 ## v2.1.1 (NOT RELEASED YET)
 
+- Added an (optmised?) browser version.
 - Ported to SDL 3
 - Fix skeletal animation hiccups (especially noticeable on pteranodon wings at high framerates)
 - Russian localization (thanks, @rellikmil)

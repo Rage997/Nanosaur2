@@ -27,6 +27,14 @@ This is a port of the original Mac version of the game to modern operating syste
 - [LICENSE](LICENSE.md) (CC-BY-NC-SA 4.0)
 - [SECRETS](SECRETS.md) - Cheat codes, etc.
 
+## Browser port
+
+**[Play Nanosaur II in your browser](https://niccolozuppichini.com/Nanosaur2/)**
+
+Play in a WebGL2 browser with a keyboard, mouse, or gamepad. Click **Play** after loading. Saves stay in your browser; no touch controls are supported.
+
+See [build and hosting instructions](BUILD.md#webassembly--webgl2).
+
 ## Legal info
 
 Nanosaur II: Hatchling © 2004-2008 Pangea Software, Inc. Nanosaur is a registered trademark of Pangea Software, Inc. This version was made and re-released here (https://github.com/jorio/Nanosaur2) under permission from Pangea Software, Inc.
