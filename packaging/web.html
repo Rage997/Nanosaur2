@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202a2d">
+<title>Nanosaur II: Hatchling — Web</title>
+<link rel="icon" href="Nanosaur2.png" type="image/png">
+<link rel="preload" href="web-assets/mac-background.webp" as="image" fetchpriority="high">
+<style>
+:root { color-scheme: dark; font-family: "Courier New", ui-monospace, monospace; color: #bfd7c7; background: #202a2d; --phosphor: #bfd7c7; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { font: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 4px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+#canvas { display: block; position: fixed; inset: 0; width: 100% !important; height: 100% !important; outline: none; background: #000; }
+#launcher {
+  position: fixed; inset: 0; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; overflow: hidden;
+  background: #202a2d; transition: opacity .6s ease, visibility 0s;
+}
+body[data-state="playing"] #launcher { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .6s ease, visibility 0s .6s; }
+.mac-stage { position: relative; width: min(100vw, 160svh); aspect-ratio: 8 / 5; flex: none; }
+.mac-render {
+  display: block; width: 100%; height: 100%; object-fit: contain;
+  mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 97%, transparent),
+    linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+  mask-composite: intersect;
+}
+.crt {
+  position: absolute; left: 38.07737%; top: 20.66485%; width: 24.26546%; height: 32.70183%;
+  container-type: inline-size; overflow: hidden; color: var(--phosphor); mix-blend-mode: screen;
+  mask: url("web-assets/crt-mask.png") 0 0 / 100% 100% no-repeat;
+}
+.crt-splash { position: absolute; inset: 0; width: 100%; height: 100%; }
+.crt::after {
+  content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: repeating-linear-gradient(transparent 0 2px, #00000016 2px 3px);
+  box-shadow: inset 0 0 2.5cqw 1cqw #0009;
+}
+.copyright { position: absolute; top: 90.7%; width: 100%; margin: 0; text-align: center; font-size: max(8px, 2.6cqw); line-height: 1.3; color: #9db7a5; }
+.credits { position: absolute; top: 95.5%; width: 100%; margin: 0; text-align: center; font-size: max(7px, 2.1cqw); line-height: 1.3; }
+.credits a { color: #9db7a5; text-underline-offset: 2px; }
+progress {
+  position: absolute; left: 19.79%; top: 73.53%; width: 60.42%; height: 3.55%; min-height: 8px;
+  display: block; appearance: none; border: 1px solid var(--phosphor); border-radius: 0;
+  padding: 2px; background: transparent; color: var(--phosphor);
+}
+progress::-webkit-progress-bar { background: transparent; }
+progress::-webkit-progress-value { background: repeating-linear-gradient(90deg, var(--phosphor) 0 1.4cqw, transparent 1.4cqw 2cqw); }
+progress::-moz-progress-bar { background: repeating-linear-gradient(90deg, var(--phosphor) 0 1.4cqw, transparent 1.4cqw 2cqw); }
+progress:not([value]) { background: linear-gradient(90deg, transparent 0 38%, #bfd7c766 38% 62%, transparent 62%); background-size: 250% 100%; animation: searching 1.6s linear infinite; }
+.load-status { position: absolute; top: 80.9%; left: 8%; width: 84%; display: flex; justify-content: center; gap: 1ch; font-size: max(9px, 3cqw); line-height: 1.4; text-align: center; }
+#status { margin: 0; }
+#download-detail { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.actions { position: absolute; bottom: 15%; left: 14%; width: 72%; z-index: 4; }
+.primary { min-height: 44px; width: 100%; border: 1px solid var(--phosphor); border-radius: 0; color: #112019; background: var(--phosphor); font-size: max(11px, 3.5cqw); font-weight: 700; }
+.primary:hover { background: #e0f0e5; }
+#launch-hint { display: none; }
+#storage { position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); margin: 0; padding: 10px 14px; font: 12px/1.5 system-ui, sans-serif; color: #e0c996; background: #102019f5; }
+#storage:empty { display: none; }
+body:is([data-state="error"], [data-state="ended"]) .crt { background: #0b1812; mix-blend-mode: normal; }
+body:is([data-state="error"], [data-state="ended"]) .crt-splash { opacity: .12; }
+body:is([data-state="error"], [data-state="ended"]) .load-status { display: block; top: 16%; max-height: 40%; overflow: auto; font-size: max(11px, 4cqw); }
+body:is([data-state="error"], [data-state="ended"]) #launch-hint { display: block; position: absolute; top: 57%; left: 8%; width: 84%; margin: 0; text-align: center; font-size: max(9px, 3cqw); }
+body[data-state="ready"] .load-status { display: none; }
+body[data-state="error"] #status { color: #f0c197; }
+#toolbar { position: fixed; z-index: 1; top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); display: flex; gap: 8px; }
+#toolbar button {
+  opacity: 0; padding: 10px 16px; border: 1px solid #b8c89755; border-radius: 3px; color: #e1e8cf;
+  background: #0a1613de; font-size: 12px; transition: opacity .25s;
+}
+body.controls-visible #toolbar button, body.needs-audio #toolbar button, #toolbar button:hover, #toolbar button:focus-visible { opacity: 1; }
+#notice { position: fixed; z-index: 3; bottom: max(24px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 20px; padding: 14px 18px; color: #e7d3a0; background: #102019f5; border: 1px solid #83946b70; border-radius: 4px; box-shadow: 0 8px 30px #0005; font-size: 12px; line-height: 1.5; }
+#dismiss { background: none; color: #e7d3a0; border: none; text-decoration: underline; text-underline-offset: 3px; font-size: 11px; }
+@keyframes searching { to { background-position: 167% 0; } }
+@media (max-aspect-ratio: 4 / 5) {
+  /* Crop the studio margins, not the computer. Screen coordinates stay unchanged. */
+  .mac-stage { width: min(260vw, 160svh); }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body data-state="loading">
+<canvas id="canvas" width="960" height="640" tabindex="0" aria-label="Nanosaur 2 game"></canvas>
+<main id="launcher" aria-label="Nanosaur II launcher">
+  <div class="mac-stage">
+    <img class="mac-render" src="web-assets/mac-background.webp" width="1600" height="1000" alt="A vintage Macintosh with keyboard and mouse" fetchpriority="high">
+    <section class="crt" aria-labelledby="game-title">
+      <h1 id="game-title" class="sr-only">Nanosaur II: Hatchling</h1>
+      <img class="crt-splash" src="web-assets/nanosaur2-splash.png" width="960" height="816" alt="" aria-hidden="true" fetchpriority="high">
+      <progress id="progress" aria-label="Downloading Nanosaur II game assets" max="100"></progress>
+      <div class="load-status"><p id="status" role="status">Loading…</p><span id="download-detail"></span></div>
+      <div class="actions" id="actions" hidden><button class="primary" id="play" disabled>Loading…</button><button class="primary" id="reload" hidden>Reload game</button></div>
+      <p id="launch-hint"></p>
+      <p class="copyright">© 2004–2008 Pangea Software, Inc.</p>
+      <p class="credits"><a href="https://github.com/Rage997/Nanosaur2" target="_blank" rel="noopener">Source code</a> · <a href="LICENSE.md" target="_blank" rel="noopener" title="CC BY-NC-SA 4.0">License</a></p>
+    </section>
+  </div>
+  <p id="storage" role="status"></p>
+</main>
+<div id="toolbar" hidden><button id="sound">Enable sound</button><button id="fullscreen">Fullscreen</button></div>
+<aside id="notice" hidden><span id="notice-text" role="status"></span><button id="dismiss" aria-label="Dismiss notification">Dismiss</button></aside>
+<script>
+'use strict';
+const canvas = document.getElementById('canvas');
+const launcher = document.getElementById('launcher');
+const statusLine = document.getElementById('status');
+const progress = document.getElementById('progress');
+const download = document.getElementById('download-detail');
+const play = document.getElementById('play');
+const reload = document.getElementById('reload');
+const actions = document.getElementById('actions');
+const launchHint = document.getElementById('launch-hint');
+const toolbar = document.getElementById('toolbar');
+const sound = document.getElementById('sound');
+const storage = document.getElementById('storage');
+const notice = document.getElementById('notice');
+let started = false, ended = false, failed = false;
+let storageAvailable = false, syncing = false, syncAgain = false;
+let controlsTimer;
+function showControls() {
+  if (!started || failed || ended) return;
+  const audio = Module['SDL3']?.audioContext;
+  const needsSound = !!audio && audio.state !== 'running';
+  document.body.classList.toggle('needs-audio', needsSound);
+  document.body.classList.add('controls-visible');
+  clearTimeout(controlsTimer);
+  controlsTimer = setTimeout(() => document.body.classList.remove('controls-visible'), 2500);
+}
+function notify(message) {
+  document.getElementById('notice-text').textContent = String(message);
+  notice.hidden = false;
+}
+function storageWarning(message) {
+  storage.textContent = message;
+  if (started && !ended) notify(message);
+}
+function showError(message) {
+  if (failed) return;
+  failed = true;
+  if (started && !ended) Module._WebSuspend(1);
+  document.exitPointerLock?.();
+  launcher.inert = false;
+  document.body.dataset.state = 'error';
+  statusLine.textContent = String(message);
+  progress.hidden = true;
+  play.hidden = true;
+  reload.hidden = false;
+  actions.hidden = false;
+  toolbar.hidden = true;
+  download.textContent = '';
+  launchHint.textContent = 'Reload the game to try again.';
+  reload.textContent = 'Reload game';
+  notice.hidden = true;
+  reload.focus({preventScroll: true});
+}
+function persist() {
+  if (!storageAvailable) return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  Module.FS.syncfs(false, error => {
+    syncing = false;
+    if (error) storageWarning('Saving failed. Settings and progress may not survive a reload.');
+    if (syncAgain) { syncAgain = false; persist(); }
+  });
+}
+window.nanosaurSyncFiles = persist;
+function resizeCanvas() {
+  if (!started || failed || ended) return;
+  const size = canvas.getBoundingClientRect();
+  Module._WebResize(Math.max(1, Math.round(size.width)), Math.max(1, Math.round(size.height)));
+}
+function updateAudioButton() {
+  const audio = Module['SDL3']?.audioContext;
+  sound.hidden = !audio || audio.state === 'running';
+}
+function resumeAudio() {
+  const audio = Module['SDL3']?.audioContext;
+  if (audio && audio.state !== 'running') {
+    audio.resume().then(updateAudioButton).catch(() => notify('Sound could not start. Try Enable sound again.'));
+  }
+}
+var Module = {
+  canvas,
+  noInitialRun: true,
+  persist,
+  reportError: showError,
+  reportWarning: notify,
+  preRun: [function() {
+    const FS = Module.FS;
+    FS.mkdir('/prefs');
+    Module.addRunDependency('persistent-storage');
+    const unavailable = 'Browser storage is unavailable. You can play, but settings and saves will not persist.';
+    let mounted = false;
+    try {
+      FS.mount(Module.IDBFS, {}, '/prefs');
+      mounted = true;
+      FS.syncfs(true, error => {
+        if (error) { FS.unmount('/prefs'); storageWarning(unavailable); }
+        else storageAvailable = true;
+        Module.removeRunDependency('persistent-storage');
+      });
+    } catch (error) {
+      if (mounted) FS.unmount('/prefs');
+      storageWarning(unavailable);
+      Module.removeRunDependency('persistent-storage');
+    }
+  }],
+  onRuntimeInitialized() {
+    if (failed) return;
+    progress.value = 100;
+    progress.hidden = true;
+    statusLine.textContent = 'Ready to fly';
+    download.textContent = '';
+    play.textContent = 'Play Nanosaur II';
+    play.disabled = false;
+    actions.hidden = false;
+    document.body.dataset.state = 'ready';
+    play.focus({preventScroll: true});
+  },
+  setStatus(text) {
+    if (failed || started || !text) return;
+    const match = text.match(/Downloading data.*\((\d+)\/(\d+)\)/);
+    if (match) {
+      const loaded = Number(match[1]), total = Number(match[2]);
+      if (total > 0) {
+        progress.value = Math.min(100, loaded / total * 100);
+        download.textContent = `${Math.floor(progress.value)}%`;
+        statusLine.textContent = loaded >= total ? 'Preparing…' : 'Loading…';
+      }
+    }
+  },
+  print: console.log.bind(console),
+  printErr: console.error.bind(console),
+  onAbort(reason) { showError('The game could not continue: ' + reason); },
+  onExit(code) {
+    ended = true;
+    persist();
+    document.exitPointerLock?.();
+    if (failed) return;
+    launcher.inert = false;
+    document.body.dataset.state = 'ended';
+    statusLine.textContent = code ? 'The game stopped unexpectedly.' : 'Thanks for playing.';
+    download.textContent = '';
+    progress.hidden = true;
+    play.hidden = true;
+    actions.hidden = false;
+    toolbar.hidden = true;
+    reload.hidden = false;
+    reload.textContent = 'Play again';
+    launchHint.textContent = 'Ready for another flight?';
+    reload.focus({preventScroll: true});
+  }
+};
+play.addEventListener('click', () => {
+  if (started || failed) return;
+  if (!document.createElement('canvas').getContext('webgl2')) {
+    showError('WebGL2 is required. Enable hardware acceleration or try another browser.');
+    return;
+  }
+  started = true;
+  document.body.dataset.state = 'playing';
+  launcher.inert = true;
+  toolbar.hidden = false;
+  canvas.focus({preventScroll: true});
+  try {
+    Module.callMain([]);
+    if (failed || ended) return;
+    resizeCanvas();
+    const audio = Module['SDL3']?.audioContext;
+    audio?.addEventListener('statechange', () => { updateAudioButton(); showControls(); });
+    resumeAudio();
+    updateAudioButton();
+    if (storage.textContent) notify(storage.textContent);
+    showControls();
+  } catch (error) { showError(error.message || error); }
+});
+canvas.addEventListener('pointerdown', () => {
+  canvas.focus({preventScroll: true});
+  resumeAudio();
+  if (started && !failed && !ended && Module.webWantsPointerLock) Module._WebCaptureMouse();
+});
+document.addEventListener('pointerlockerror', () => notify('Mouse capture was denied. Click the game to try again, or use keyboard/gamepad controls.'));
+canvas.addEventListener('contextmenu', event => event.preventDefault());
+canvas.addEventListener('keydown', event => {
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Tab'].includes(event.key)) event.preventDefault();
+});
+canvas.addEventListener('blur', () => { if (started && !failed && !ended) Module._WebClearInput(); });
+canvas.addEventListener('webglcontextcreationerror', () => showError('Could not create a WebGL2 context. Check browser hardware acceleration.'));
+canvas.addEventListener('webglcontextlost', event => {
+  event.preventDefault();
+  showError('Graphics context lost. Reload the game to recover; unsaved progress will be lost.');
+});
+document.getElementById('fullscreen').addEventListener('click', () => {
+  resumeAudio();
+  try {
+    if (!document.documentElement.requestFullscreen) throw new Error('Fullscreen unavailable');
+    document.documentElement.requestFullscreen().catch(() => notify('Fullscreen unavailable. You can keep playing in this window.'));
+  } catch (_) { notify('Fullscreen unavailable. You can keep playing in this window.'); }
+  canvas.focus({preventScroll: true});
+});
+sound.addEventListener('click', () => { resumeAudio(); canvas.focus({preventScroll: true}); });
+document.addEventListener('fullscreenchange', () => { requestAnimationFrame(resizeCanvas); showControls(); });
+document.addEventListener('pointermove', showControls);
+new ResizeObserver(resizeCanvas).observe(canvas);
+document.addEventListener('visibilitychange', () => {
+  if (started && !failed && !ended) Module._WebSuspend(document.hidden ? 1 : 0);
+  if (document.hidden) persist();
+});
+window.addEventListener('pagehide', persist);
+reload.addEventListener('click', () => location.reload());
+document.getElementById('dismiss').addEventListener('click', () => {
+  notice.hidden = true;
+  if (started && !failed && !ended) canvas.focus({preventScroll: true});
+});
+window.addEventListener('error', event => showError(event.message || 'Failed to load game files.'));
+window.addEventListener('unhandledrejection', event => showError(String(event.reason)));
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
