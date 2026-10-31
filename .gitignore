@@ -4,6 +4,7 @@ cache/
 extern/SDL2-*
 extern/SDL2.framework
 dist/
+_site/
 
 # IDEs and OS-specific stuff
 .vs/
