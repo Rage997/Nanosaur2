@@ -1,10 +1,21 @@
 #pragma once
 
+#include <stddef.h>
+
 // The game's fixed-function subset, implemented with WebGL2 shaders and buffers.
 // Desktop GL headers supply enums/types only; native builds never include this file.
 void WebGL_Init(void);
 void WebGL_Shutdown(void);
 void WebGL_DrawTriangles(int vertexCount, int indexCount, const void *indices);
+
+// Static arrays follow the model allocator's lifetime; other geometry is streamed.
+void WebGL_RegisterStaticArray(const void *pointer, size_t bytes);
+void WebGL_UnregisterStaticArray(const void *pointer);
+void WebGL_InvalidateStaticArrays(void);
+void WebGL_ClearStaticArrays(void);
+GLuint WebGL_GetStaticArrayBuffer(GLenum target, const void *pointer, size_t bytes);
+void WebGL_InvalidateBufferState(void);
+
 void WebGL_Enable(GLenum cap);
 void WebGL_Disable(GLenum cap);
 GLboolean WebGL_IsEnabled(GLenum cap);

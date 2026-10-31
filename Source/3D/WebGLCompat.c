@@ -62,6 +62,35 @@ static struct
 	GLint textured, texgen, combine, fog, fogColor, fogRange, fogDensity, fogMode, alphaTest, alphaFunction,
 		alphaReference;
 } u;
+// Last uploaded value per uniform; Prepare issues a glUniform only when this changes.
+static struct
+{
+	GLfloat model[16], projection[16], normal[9], texture[2][16];
+	GLfloat material[4], ambient[4], fogColor[4], fogRange[2];
+	GLfloat lightPosition[LIGHT_COUNT][4], lightDiffuse[LIGHT_COUNT][4], lightAmbient[LIGHT_COUNT][4];
+	GLfloat fogDensity, alphaReference;
+	GLint lights[LIGHT_COUNT], textured[2], texgen[4], combine[4];
+	GLint lighting, normalize, colorMaterial, twoSided, fog, alphaTest, alphaFunction, fogMode;
+} lastUniform;
+static bool uniformsValid = false;
+// Shadow of our VAO's buffer/attribute state. External native GL work must call
+// WebGL_InvalidateBufferState so these can never go stale.
+typedef struct
+{
+	GLboolean enabled;
+	bool known;
+	GLuint buffer;
+	GLint size;
+	GLenum type;
+	GLsizei stride;
+	const void *offset;
+	bool pointerKnown;
+	GLfloat constant[4];
+	bool constantKnown;
+} AttributeState;
+static AttributeState attributeState[ATTRIBUTE_COUNT];
+static GLuint boundArrayBuffer, boundElementBuffer, boundVertexArray;
+static const GLfloat upNormal[4] = {0, 0, 1, 1};
 
 static const char *vertexSource =
 	"#version 300 es\nprecision highp float;\n"
@@ -135,8 +164,94 @@ static GLuint Compile(GLenum type, const char *source)
 	}
 	return shader;
 }
+static void ResetBufferShadows(void)
+{
+	boundArrayBuffer = boundElementBuffer = boundVertexArray = 0;
+	for (unsigned i = 0; i < ATTRIBUTE_COUNT; i++)
+	{
+		attributeState[i].known = false;
+		attributeState[i].pointerKnown = false;
+		attributeState[i].constantKnown = false;
+	}
+}
+void WebGL_InvalidateBufferState(void)
+{
+	ResetBufferShadows();
+}
+static void BindBuffer(GLenum target, GLuint name)
+{
+	GLuint *shadow = target == GL_ELEMENT_ARRAY_BUFFER ? &boundElementBuffer : &boundArrayBuffer;
+	if (*shadow != name)
+	{
+		glBindBuffer(target, name);
+		*shadow = name;
+	}
+}
+static void BindVertexArray(GLuint name)
+{
+	if (boundVertexArray != name)
+	{
+		glBindVertexArray(name);
+		boundVertexArray = name;
+	}
+}
+static void EnableAttribute(unsigned i, GLint size, GLsizei stride, const void *offset)
+{
+	AttributeState *s = &attributeState[i];
+	// Array draws may leave the current constant attribute value unspecified.
+	s->constantKnown = false;
+	if (!s->known || !s->enabled)
+	{
+		glEnableVertexAttribArray(i);
+		s->enabled = GL_TRUE;
+		s->known = true;
+	}
+	if (!s->pointerKnown || s->buffer != boundArrayBuffer || s->size != size || s->type != GL_FLOAT ||
+		s->stride != stride || s->offset != offset)
+	{
+		glVertexAttribPointer(i, size, GL_FLOAT, GL_FALSE, stride, offset);
+		s->buffer = boundArrayBuffer;
+		s->size = size;
+		s->type = GL_FLOAT;
+		s->stride = stride;
+		s->offset = offset;
+		s->pointerKnown = true;
+	}
+}
+static void DisableAttribute(unsigned i)
+{
+	AttributeState *s = &attributeState[i];
+	if (!s->known || s->enabled)
+	{
+		glDisableVertexAttribArray(i);
+		s->enabled = GL_FALSE;
+		s->known = true;
+	}
+}
+static void SetAttributeConstant(unsigned i, const GLfloat *value)
+{
+	AttributeState *s = &attributeState[i];
+	if (s->constantKnown && memcmp(s->constant, value, sizeof(s->constant)) == 0)
+		return;
+	if (i == 1)
+		glVertexAttrib3f(i, value[0], value[1], value[2]);
+	else if (i == 2)
+		glVertexAttrib4fv(i, value);
+	else
+		glVertexAttrib2fv(i, value);
+	memcpy(s->constant, value, sizeof(s->constant));
+	s->constantKnown = true;
+}
 void WebGL_Init(void)
 {
+	WebGL_ClearStaticArrays();
+	// The context is reused across restarts; retained capacities must not outlive freed buffers.
+	vertexCapacity = indexCapacity = quadCount = pixelCapacity = 0;
+	for (int i = 0; i < ATTRIBUTE_COUNT; i++)
+		attributes[i].capacity = 0;
+	elementBuffer.capacity = immediateBuffer.capacity = quadBuffer.capacity = 0;
+	ResetBufferShadows();
+	uniformsValid = false;
 	Identity(model.value[0]);
 	Identity(projection.value[0]);
 	Identity(textureMatrix[0].value[0]);
@@ -190,7 +305,7 @@ void WebGL_Init(void)
 	glUniform1i(glGetUniformLocation(program, "image0"), 0);
 	glUniform1i(glGetUniformLocation(program, "image1"), 1);
 	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
+	BindVertexArray(vao);
 	for (int i = 0; i < ATTRIBUTE_COUNT; i++)
 		glGenBuffers(1, &attributes[i].name);
 	glGenBuffers(1, &elementBuffer.name);
@@ -212,6 +327,7 @@ void WebGL_Init(void)
 }
 void WebGL_Shutdown(void)
 {
+	WebGL_ClearStaticArrays();
 	for (int i = 0; i < ATTRIBUTE_COUNT; i++)
 		glDeleteBuffers(1, &attributes[i].name);
 	glDeleteBuffers(1, &elementBuffer.name);
@@ -226,53 +342,130 @@ void WebGL_Shutdown(void)
 	vertices = NULL;
 	indices = NULL;
 	convertedPixels = NULL;
+	vertexCapacity = indexCapacity = quadCount = pixelCapacity = 0;
+	ResetBufferShadows();
+	uniformsValid = false;
 }
+#define UploadUniformI(field, v, call) \
+	do \
+	{ \
+		GLint cached = (GLint)(v); \
+		if (!uniformsValid || lastUniform.field != cached) \
+		{ \
+			lastUniform.field = cached; \
+			call; \
+		} \
+	} while (0)
+#define UploadUniformF(field, v, call) \
+	do \
+	{ \
+		GLfloat cached = (v); \
+		if (!uniformsValid || lastUniform.field != cached) \
+		{ \
+			lastUniform.field = cached; \
+			call; \
+		} \
+	} while (0)
+#define UploadUniformV(field, v, count, call) \
+	do \
+	{ \
+		if (!uniformsValid || memcmp(lastUniform.field, (v), (count) * sizeof(GLfloat)) != 0) \
+		{ \
+			memcpy(lastUniform.field, (v), (count) * sizeof(GLfloat)); \
+			call; \
+		} \
+	} while (0)
 static void Prepare(void)
 {
 	if (!dirty)
 		return;
 	dirty = false;
 	const GLfloat *m = model.value[model.top];
-	GLfloat n[9] = {m[5] * m[10] - m[6] * m[9], m[6] * m[8] - m[4] * m[10], m[4] * m[9] - m[5] * m[8],
-					m[9] * m[2] - m[10] * m[1], m[10] * m[0] - m[8] * m[2], m[8] * m[1] - m[9] * m[0],
-					m[1] * m[6] - m[2] * m[5],	m[2] * m[4] - m[0] * m[6],	m[0] * m[5] - m[1] * m[4]};
-	GLfloat determinant = m[0] * n[0] + m[1] * n[1] + m[2] * n[2];
-	if (fabsf(determinant) > 1e-20f)
-		for (int i = 0; i < 9; i++)
-			n[i] /= determinant;
-	glUniformMatrix4fv(u.model, 1, GL_FALSE, m);
-	glUniformMatrix4fv(u.projection, 1, GL_FALSE, projection.value[projection.top]);
-	glUniformMatrix3fv(u.normal, 1, GL_FALSE, n);
+	if (!uniformsValid || memcmp(lastUniform.model, m, sizeof(lastUniform.model)) != 0)
+	{
+		memcpy(lastUniform.model, m, sizeof(lastUniform.model));
+		glUniformMatrix4fv(u.model, 1, GL_FALSE, m);
+		// The normal matrix is a pure function of the model matrix; recompute only on change.
+		GLfloat n[9] = {m[5] * m[10] - m[6] * m[9], m[6] * m[8] - m[4] * m[10], m[4] * m[9] - m[5] * m[8],
+						m[9] * m[2] - m[10] * m[1], m[10] * m[0] - m[8] * m[2], m[8] * m[1] - m[9] * m[0],
+						m[1] * m[6] - m[2] * m[5],	m[2] * m[4] - m[0] * m[6],	m[0] * m[5] - m[1] * m[4]};
+		GLfloat determinant = m[0] * n[0] + m[1] * n[1] + m[2] * n[2];
+		if (fabsf(determinant) > 1e-20f)
+			for (int i = 0; i < 9; i++)
+				n[i] /= determinant;
+		UploadUniformV(normal, n, 9, glUniformMatrix3fv(u.normal, 1, GL_FALSE, n));
+	}
+	const GLfloat *p = projection.value[projection.top];
+	if (!uniformsValid || memcmp(lastUniform.projection, p, sizeof(lastUniform.projection)) != 0)
+	{
+		memcpy(lastUniform.projection, p, sizeof(lastUniform.projection));
+		glUniformMatrix4fv(u.projection, 1, GL_FALSE, p);
+	}
 	for (int i = 0; i < 2; i++)
-		glUniformMatrix4fv(u.texture[i], 1, GL_FALSE, textureMatrix[i].value[textureMatrix[i].top]);
-	glUniform1i(u.lighting, lighting);
-	glUniform1i(u.normalize, normalizeNormals || rescaleNormals);
-	glUniform1i(u.colorMaterial, colorMaterial);
-	glUniform4fv(u.material, 1, material);
-	glUniform1i(u.twoSided, twoSided);
-	glUniform4fv(u.ambient, 1, ambient);
+	{
+		const GLfloat *t = textureMatrix[i].value[textureMatrix[i].top];
+		if (!uniformsValid || memcmp(lastUniform.texture[i], t, sizeof(lastUniform.texture[i])) != 0)
+		{
+			memcpy(lastUniform.texture[i], t, sizeof(lastUniform.texture[i]));
+			glUniformMatrix4fv(u.texture[i], 1, GL_FALSE, t);
+		}
+	}
+	UploadUniformI(lighting, lighting, glUniform1i(u.lighting, lighting));
+	UploadUniformI(normalize, normalizeNormals || rescaleNormals, glUniform1i(u.normalize, normalizeNormals || rescaleNormals));
+	UploadUniformI(colorMaterial, colorMaterial, glUniform1i(u.colorMaterial, colorMaterial));
+	UploadUniformV(material, material, 4, glUniform4fv(u.material, 1, material));
+	UploadUniformI(twoSided, twoSided, glUniform1i(u.twoSided, twoSided));
+	UploadUniformV(ambient, ambient, 4, glUniform4fv(u.ambient, 1, ambient));
 	GLint enabled[LIGHT_COUNT];
 	for (int i = 0; i < LIGHT_COUNT; i++)
 		enabled[i] = lights[i];
-	glUniform1iv(u.lights, LIGHT_COUNT, enabled);
-	glUniform4fv(u.lightPosition, LIGHT_COUNT, &lightPosition[0][0]);
-	glUniform4fv(u.lightDiffuse, LIGHT_COUNT, &lightDiffuse[0][0]);
-	glUniform4fv(u.lightAmbient, LIGHT_COUNT, &lightAmbient[0][0]);
-	glUniform2i(u.textured, textured[0], textured[1]);
-	glUniform4i(u.texgen, texgen[0][0], texgen[0][1], texgen[1][0], texgen[1][1]);
-	glUniform4i(u.combine, envMode[0] == GL_COMBINE && combineRGB[0] == GL_ADD,
-				envMode[0] == GL_COMBINE && combineAlpha[0] == GL_ADD,
-				envMode[1] == GL_COMBINE && combineRGB[1] == GL_ADD,
-				envMode[1] == GL_COMBINE && combineAlpha[1] == GL_ADD);
-	glUniform1i(u.fog, fog);
-	glUniform4fv(u.fogColor, 1, fogColor);
-	glUniform2f(u.fogRange, fogStart, fogEnd);
-	glUniform1f(u.fogDensity, fogDensity);
-	glUniform1i(u.fogMode, fogMode);
-	glUniform1i(u.alphaTest, alphaTest);
-	glUniform1i(u.alphaFunction, alphaFunction);
-	glUniform1f(u.alphaReference, alphaReference);
+	if (!uniformsValid || memcmp(lastUniform.lights, enabled, sizeof(enabled)) != 0)
+	{
+		memcpy(lastUniform.lights, enabled, sizeof(enabled));
+		glUniform1iv(u.lights, LIGHT_COUNT, enabled);
+	}
+	UploadUniformV(lightPosition, lightPosition, LIGHT_COUNT * 4, glUniform4fv(u.lightPosition, LIGHT_COUNT, &lightPosition[0][0]));
+	UploadUniformV(lightDiffuse, lightDiffuse, LIGHT_COUNT * 4, glUniform4fv(u.lightDiffuse, LIGHT_COUNT, &lightDiffuse[0][0]));
+	UploadUniformV(lightAmbient, lightAmbient, LIGHT_COUNT * 4, glUniform4fv(u.lightAmbient, LIGHT_COUNT, &lightAmbient[0][0]));
+	if (!uniformsValid || lastUniform.textured[0] != (GLint)textured[0] || lastUniform.textured[1] != (GLint)textured[1])
+	{
+		lastUniform.textured[0] = textured[0];
+		lastUniform.textured[1] = textured[1];
+		glUniform2i(u.textured, textured[0], textured[1]);
+	}
+	GLint texgenValue[4] = {texgen[0][0], texgen[0][1], texgen[1][0], texgen[1][1]};
+	if (!uniformsValid || memcmp(lastUniform.texgen, texgenValue, sizeof(lastUniform.texgen)) != 0)
+	{
+		memcpy(lastUniform.texgen, texgenValue, sizeof(lastUniform.texgen));
+		glUniform4i(u.texgen, texgenValue[0], texgenValue[1], texgenValue[2], texgenValue[3]);
+	}
+	GLint combineValue[4] = {envMode[0] == GL_COMBINE && combineRGB[0] == GL_ADD,
+							 envMode[0] == GL_COMBINE && combineAlpha[0] == GL_ADD,
+							 envMode[1] == GL_COMBINE && combineRGB[1] == GL_ADD,
+							 envMode[1] == GL_COMBINE && combineAlpha[1] == GL_ADD};
+	if (!uniformsValid || memcmp(lastUniform.combine, combineValue, sizeof(lastUniform.combine)) != 0)
+	{
+		memcpy(lastUniform.combine, combineValue, sizeof(lastUniform.combine));
+		glUniform4i(u.combine, combineValue[0], combineValue[1], combineValue[2], combineValue[3]);
+	}
+	UploadUniformI(fog, fog, glUniform1i(u.fog, fog));
+	UploadUniformV(fogColor, fogColor, 4, glUniform4fv(u.fogColor, 1, fogColor));
+	if (!uniformsValid || lastUniform.fogRange[0] != fogStart || lastUniform.fogRange[1] != fogEnd)
+	{
+		lastUniform.fogRange[0] = fogStart;
+		lastUniform.fogRange[1] = fogEnd;
+		glUniform2f(u.fogRange, fogStart, fogEnd);
+	}
+	UploadUniformF(fogDensity, fogDensity, glUniform1f(u.fogDensity, fogDensity));
+	UploadUniformI(fogMode, fogMode, glUniform1i(u.fogMode, fogMode));
+	UploadUniformI(alphaTest, alphaTest, glUniform1i(u.alphaTest, alphaTest));
+	UploadUniformI(alphaFunction, alphaFunction, glUniform1i(u.alphaFunction, alphaFunction));
+	UploadUniformF(alphaReference, alphaReference, glUniform1f(u.alphaReference, alphaReference));
+	uniformsValid = true;
 }
+#undef UploadUniformI
+#undef UploadUniformF
+#undef UploadUniformV
 static GLboolean *Capability(GLenum cap)
 {
 	if (cap >= GL_LIGHT0 && cap < GL_LIGHT0 + LIGHT_COUNT)
@@ -578,15 +771,22 @@ void WebGL_TexCoordPointer(GLint size, GLenum type, GLsizei stride, const void *
 }
 static void Upload(Buffer *buffer, GLenum target, const void *data, size_t bytes)
 {
-	glBindBuffer(target, buffer->name);
+	GLuint cached = WebGL_GetStaticArrayBuffer(target, data, bytes);
+	if (cached)
+	{
+		BindBuffer(target, cached);
+		return;
+	}
+	BindBuffer(target, buffer->name);
 	if (bytes > buffer->capacity)
 	{
 		size_t capacity = buffer->capacity ? buffer->capacity : 4096;
 		while (capacity < bytes)
 			capacity *= 2;
-		glBufferData(target, capacity, NULL, GL_DYNAMIC_DRAW);
 		buffer->capacity = capacity;
 	}
+	// Orphan before every overwrite; in-place reuse of a shared streamed buffer stalls the GPU.
+	glBufferData(target, buffer->capacity, NULL, GL_STREAM_DRAW);
 	glBufferSubData(target, 0, bytes, data);
 }
 static void ReserveIndices(size_t count)
@@ -607,6 +807,7 @@ void WebGL_DrawTriangles(int count, int elements, const void *data)
 		return;
 	GAME_ASSERT(count > 0 && elements > 0 && elements % 3 == 0 && data);
 	Prepare();
+	BindVertexArray(vao);
 	for (unsigned i = 0; i < ATTRIBUTE_COUNT; i++)
 	{
 		ClientArray *a = &arrays[i];
@@ -616,18 +817,20 @@ void WebGL_DrawTriangles(int count, int elements, const void *data)
 		{
 			GAME_ASSERT(a->pointer);
 			Upload(&attributes[i], GL_ARRAY_BUFFER, a->pointer, (size_t)count * a->size * sizeof(GLfloat));
-			glEnableVertexAttribArray(i);
-			glVertexAttribPointer(i, a->size, GL_FLOAT, GL_FALSE, 0, 0);
+			EnableAttribute(i, a->size, 0, 0);
 		}
 		else
 		{
-			glDisableVertexAttribArray(i);
+			DisableAttribute(i);
 			if (i == 1)
-				glVertexAttrib3f(i, 0, 0, 1);
+				SetAttributeConstant(i, upNormal);
 			else if (i == 2)
-				glVertexAttrib4fv(i, color);
+				SetAttributeConstant(i, color);
 			else if (i >= 3)
-				glVertexAttrib2fv(i, uv);
+			{
+				GLfloat constant[4] = {uv[0], uv[1], 0, 1};
+				SetAttributeConstant(i, constant);
+			}
 		}
 	}
 	GLenum mode = GL_TRIANGLES;
@@ -692,18 +895,18 @@ void WebGL_End(void)
 	if (!vertexCount)
 		return;
 	Prepare();
+	BindVertexArray(vao);
 	Upload(&immediateBuffer, GL_ARRAY_BUFFER, vertices, vertexCount * sizeof(*vertices));
 	static const GLint sizes[5] = {3, 3, 4, 2, 2};
 	static const size_t offsets[5] = {offsetof(Vertex, position), 0, offsetof(Vertex, color), offsetof(Vertex, uv),
 									  offsetof(Vertex, uv)};
-	glDisableVertexAttribArray(1);
-	glVertexAttrib3f(1, 0, 0, 1);
+	DisableAttribute(1);
+	SetAttributeConstant(1, upNormal);
 	for (unsigned i = 0; i < ATTRIBUTE_COUNT; i++)
 	{
 		if (i == 1)
 			continue;
-		glEnableVertexAttribArray(i);
-		glVertexAttribPointer(i, sizes[i], GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)offsets[i]);
+		EnableAttribute(i, sizes[i], sizeof(Vertex), (const void *)offsets[i]);
 	}
 	if (mode == GL_QUADS)
 	{
@@ -726,7 +929,7 @@ void WebGL_End(void)
 			quadCount = quads;
 		}
 		else
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, quadBuffer.name);
+			BindBuffer(GL_ELEMENT_ARRAY_BUFFER, quadBuffer.name);
 		glDrawElements(GL_TRIANGLES, quads * 6, GL_UNSIGNED_INT, 0);
 	}
 	else

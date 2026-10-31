@@ -2273,7 +2273,10 @@ static void OGL_DisableVertexArrayRanges(void)
 	if (!gVARMemoryAllocated)
 		DoFatalAlert("OGL_DisableVertexArrayRanges: VAR already off.");
 
-
+#ifdef __EMSCRIPTEN__
+	// Release the cached BG3D GPU buffers before the pool memory is freed.
+	WebGL_ClearStaticArrays();
+#endif
 #if VERTEXARRAYRANGES
 			/* TELL OPENGL WE ARE NOT USING VERTEX ARRAY RANGES ANYMORE */
 
@@ -2425,6 +2428,11 @@ got_it:
 	gVertexArrayRangeSize[type] = (uintptr_t)gVertexArrayMemory_Tail[type]->pointer + gVertexArrayMemory_Tail[type]->size - (uintptr_t)gVertexArrayMemoryBlock[type];	// calc the total size of the memory block we're using
 #endif
 
+#ifdef __EMSCRIPTEN__
+	// BG3D model arrays are static for the scene; cache them on the GPU.
+	if (type == VERTEX_ARRAY_RANGE_TYPE_BG3DMODELS)
+		WebGL_RegisterStaticArray(newNode->pointer, size);
+#endif
 	return(newNode->pointer);
 }
 
@@ -2454,7 +2462,11 @@ VertexArrayMemoryNode	*scanNode, *prev, *next;
 	{
 		if (scanNode->pointer == pointer)						// does this node match our pointer
 		{
-					/* REMOVE THE NODE FROM THE LINKED LIST */
+#ifdef __EMSCRIPTEN__
+			// Drop the cached GPU copy before this pool address can be reused.
+			if (type == VERTEX_ARRAY_RANGE_TYPE_BG3DMODELS)
+				WebGL_UnregisterStaticArray(pointer);
+#endif
 
 			prev = scanNode->prevNode;
 			next = scanNode->nextNode;
@@ -2545,6 +2557,11 @@ void OGL_SetVertexArrayRangeDirty(short buffer)
 	GAME_ASSERT(buffer < NUM_VERTEX_ARRAY_RANGES);
 
 	gForceVertexArrayUpdate[buffer] = true;
+#endif
+#ifdef __EMSCRIPTEN__
+	// BG3D geometry is cached on the GPU; a dirty mark means re-upload.
+	if (buffer == VERTEX_ARRAY_RANGE_TYPE_BG3DMODELS)
+		WebGL_InvalidateStaticArrays();
 #endif
 }
 
