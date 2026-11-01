@@ -41,15 +41,14 @@ Nanosaur II: Hatchling © 2004-2008 Pangea Software, Inc. Nanosaur is a register
 
 This version is licensed under [CC-BY-NC SA 4.0](LICENSE.md).
 
-## More Pangea stuff!
+## Other Pangea game web ports
 
-Check out my ports of other Pangea classics:
-- [Billy Frontier](https://github.com/jorio/BillyFrontier)
-- [Bugdom](https://github.com/jorio/Bugdom)
-- [Cro-Mag Rally](https://github.com/jorio/CroMagRally)
-- [Mighty Mike (Power Pete)](https://github.com/jorio/MightyMike)
-- [Nanosaur 1](https://github.com/jorio/Nanosaur)
-- [Nanosaur 2](https://github.com/jorio/Nanosaur2)
-- [Otto Matic](https://github.com/jorio/OttoMatic)
+Play my other Pangea web ports in your browser:
+
+- [Bugdom](https://niccolozuppichini.com/Bugdom/)
+- [Cro-Mag Rally](https://niccolozuppichini.com/CroMagRally/)
+- [Mighty Mike (Power Pete)](https://niccolozuppichini.com/MightyMike/)
+- [Nanosaur](https://niccolozuppichini.com/Nanosaur/)
+- [Otto Matic](https://niccolozuppichini.com/OttoMatic/)
 
 All ports are free of charge! If you’d like to support the development of Pangea game ports, feel free to visit https://jorio.itch.io and name your own price for any of the games there. Much appreciated! 😊
